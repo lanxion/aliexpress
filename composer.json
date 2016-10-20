@@ -1,0 +1,19 @@
+{
+    "name": "lanxion/aliexpress",
+    "description": "aliexpress php sdk",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "daidongsheng",
+            "email": "daids@mail.com"
+        }
+    ],
+    "minimum-stability": "dev",
+    "require": {},
+    "autoload": {
+	"psr-4": {
+	    "Aliexpress\\": "src/Alipress/"
+	}
+    }
+}
