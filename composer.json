@@ -1,19 +1,21 @@
 {
     "name": "lanxion/aliexpress",
-    "description": "aliexpress php sdk",
-    "type": "library",
+    "description": "aliexpress api",
+    "type": "lib",
     "license": "MIT",
     "authors": [
         {
             "name": "daidongsheng",
-            "email": "daids@mail.com"
+            "email": "daidongsheng@lanixon.com"
         }
     ],
-    "minimum-stability": "dev",
-    "require": {},
+    "minimum-stability": "stable",
+    "require": {
+        "guzzlehttp/guzzle": "~6.0"
+    },
     "autoload": {
-	"psr-4": {
-	    "Aliexpress\\": "src/Alipress/"
-	}
+       "psr-4": {
+           "Aliexpress\\": "src/Aliexpress/"
+       }
     }
 }
