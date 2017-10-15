@@ -6,61 +6,36 @@ use GuzzleHttp\Client as HttpClient;
 
 class Client
 {
+    const HOST_SERVER = 'https://gw.api.alibaba.com/';
     private $httpClient;
     private $appKey;
     private $secKey;
-    private $hostServer = 'gw.api.alibaba.com';
     private $refreshToken;
     private $accessToken;
-    private $accessTokenExpired = 0;
+    private $expiredAt;
 
-    public function __construct($appKey = '', $secKey = '', $refreshToken = '', $accessToken = '', $client = null)
+    public function __construct($appKey, $secKey, $refreshToken, $accessToken = '', $expiredAt = 0, $httpClient = null)
     {
-        $this->setHttpClient($client);
-        $this->setAppKey($appKey);
-        $this->setSecKey($secKey);
-        $this->setRefreshToken($refreshToken);
-        if ($accessToken) {
-            $this->refreshToken();
-        } else {
-            $this->setAccessToken($accessToken);
-        }
-        
-    }
-
-    public function getAccessTokenExpired()
-    {
-        return $this->accessTokenExpired;
-    }
-
-    public function getAccessToken()
-    {
-        return $this->accessToken;
-    }
-
-    public function setAccessToken($accessToken)
-    {
-        $this->accessToken = $accessToken;
-    }
-
-    public function setHttpClient($client)
-    {
-        $this->httpClient = $client ? : new HttpClient(['debug'=> false]);
-    }
-
-    public function setAppKey($appKey)
-    {
+        $this->httpClient = $httpClient ? : new HttpClient();
         $this->appKey = $appKey;
-    }
-
-    public function setSecKey($secKey)
-    {
         $this->secKey = $secKey;
+        $this->refreshToken = $refreshToken;
+        $this->setAccessToken($accessToken, $expiredAt);
     }
 
-    public function setRefreshToken($refreshToken)
+    public function setAccessToken($accessToken, $expiredAt)
     {
-        $this->refreshToken = $refreshToken;
+        if (! empty($accessToken) && $expiredAt > 100) {
+            $this->accessToken = $accessToken;
+            $this->expiredAt = $expiredAt;
+        } else {
+            $this->refreshToken();
+        }
+    }
+
+    public function initHttpClient($client = null)
+    {
+        $this->httpClient = $client ? : new HttpClient();
     }
 
     public function getAuthUrl($redirectUrl)
@@ -72,7 +47,7 @@ class Client
         ];
         $params['_aop_signature'] = $this->sign('', $params);
 
-        return 'http://gw.api.alibaba.com/auth/authorize.htm?'.http_build_query($params);
+        return self::HOST_SERVER.'auth/authorize.htm?'.http_build_query($params);
     }
 
     public function getToken($code, $redirectUrl = 'default')
@@ -89,7 +64,7 @@ class Client
         return $this->request('POST', 'system.oauth2/getToken', $params, fasle);
     }
 
-    public function refreshToken()
+    private function refreshToken()
     {
         $params = [
             'refresh_token' => $this->refreshToken,
@@ -99,18 +74,50 @@ class Client
         ];
         
         $response = $this->request('POST', 'system.oauth2/getToken', $params, false);
-        if (isset($response['access_token'])) {
-            $this->accessToken = $response['access_token'];
-            $this->accessTokenExpired = time() + intval($response['expires_in']);
+        if (! isset($response['access_token'])) {
+            throw new Exception('Get access token failed!');
         }
-        return false;
+        $this->expiredAt = time() + intval($response['expires_in']);
+        $this->accessToken = $response['access_token'];
     }
 
-    public function updateAccessToken()
+    private function updateAccessToken()
     {
-        if ($this->accessTokenExpired < time()) {
+        if ($this->expiredAt < time()) {
             $this->refreshToken();
         }
+    }
+
+    private function request($method, $apiPath, $params = [], $sign = true)
+    {
+        $params = array_filter($params);
+        if ($sign) {
+            $this->updateAccessToken();
+            $params['access_token'] = $this->accessToken;
+            $params['_aop_signature'] = $this->sign('param2/1/'.$apiPath.'/'.$this->appKey, $params);
+        }
+        $queryString = http_build_query($params);
+        $uri = 'https://'.$this->hostServer.'/openapi/param2/1/'.$apiPath.'/'.$this->appKey.'?'.$queryString;
+        try {
+            $response = $this->httpClient->request($method, $uri, $params);
+            $response = json_decode($response->getBody()->getContents(), true);
+            if (! is_array($response)) {
+                return ['error' => 'error_response', 'error_description' => 'Response content is not Array!'];
+            }
+        } catch (\Exception $e) {
+            return ['error' => 'requset_exception', 'error_description' => $e->getMessage()];
+        }
+        return $response;
+    }
+
+    private function sign($path, $params)
+    {
+        array_walk($params, function (&$value, $key) {
+            $value = $key.$value;
+        });
+        sort($params);
+
+        return strtoupper(bin2hex(hash_hmac('sha1', $path.implode($params), $this->secKey, true)));
     }
 
     public function findOrderListQuery($page = 1, $pageSize = 50, $createDateStart = '', $createDateEnd = '', $orderStatus = '')
@@ -184,58 +191,13 @@ class Client
         return $this->request('POST', $apiPath, $params);
     }
 
-    public function request($method, $apiPath, $params = [], $sign = true)
-    {
-        $params = array_filter($params);
-        if ($sign) {
-            $this->updateAccessToken();
-            $params['access_token'] = $this->accessToken;
-            $params['_aop_signature'] = $this->sign('param2/1/'.$apiPath.'/'.$this->appKey, $params);
-        }
-        $queryString = http_build_query($params);
-        $uri = 'https://'.$this->hostServer.'/openapi/param2/1/'.$apiPath.'/'.$this->appKey.'?'.$queryString;
-        try {
-            $response = $this->httpClient->request($method, $uri, $params);
-            $response = json_decode($response->getBody()->getContents(), true);
-            if (! is_array($response)) {
-                return ['error' => false];
-            }
-        } catch (\Exception $e) {
-            logger('smt request exception:'.$e->getMessage());
-            return ['error' => false, 'message' => $e->getMessage()];
-        }
-        return $response;
-    }
-
-    public function sign($path, $params)
-    {
-        array_walk($params, function (&$value, $key) {
-            $value = $key.$value;
-        });
-        sort($params);
-
-        return strtoupper(bin2hex(hash_hmac('sha1', $path.implode($params), $this->secKey, true)));
-    }
-
-    //根据订单id 获取可用的线上物流方式
-    public function apiGetOnlineLogisticsServiceListByOrderId($orderId)
-    {
-        $params = [
-            'orderId' => $orderId,
-        ];
-        $apiPath = 'aliexpress.open/api.getOnlineLogisticsServiceListByOrderId';
-        return $this->request('POST', $apiPath, $params);
-    }
-
-    //获取第三方物流公司及其列表
-    public function apiQureyWlbDomesticLogisticsCompany()
+    public function qureyWlbDomesticLogisticsCompany()
     {
         $apiPath = 'aliexpress.open/api.qureyWlbDomesticLogisticsCompany';
         return $this->request('POST', $apiPath, []);
     }
 
-    //根据产品ID 获取产品详细信息
-    public function apiFindAeProductById($productId)
+    public function findAeProductById($productId)
     {
         $params = [
             'productId' => $productId,
@@ -244,8 +206,7 @@ class Client
         return $this->request('POST', $apiPath, $params);
     }
 
-    //根据分类id获取 分类详细信息
-    public function apiGetPostCategoryById($categoryId)
+    public function getPostCategoryById($categoryId)
     {
         $params = [
             'cateId' => $categoryId,
@@ -254,22 +215,19 @@ class Client
         return $this->request('POST', $apiPath, $params);
     }
 
-    //根据分类id获取 分类详细信息
-    public function apiCreateWarehouseOrder($params)
+    public function createWarehouseOrder($params)
     {
         $apiPath = 'aliexpress.open/api.createWarehouseOrder';
         return $this->request('POST', $apiPath, $params);
     }
 
-    //打印标签
-    public function apiGetPrintInfo($internationalLogisticsId)
+    public function getPrintInfo($internationalLogisticsId)
     {
         $apiPath = 'aliexpress.open/api.getPrintInfo';
         return $this->request('POST', $apiPath, ['internationalLogisticsId'=>$internationalLogisticsId]);
     }
 
-    //获取卖家地址列表  郑州的 refund addressId 59720379
-    public function apiGetLogisticsSellerAddresses()
+    public function getLogisticsSellerAddresses()
     {
         $apiPath = 'aliexpress.open/alibaba.ae.api.getLogisticsSellerAddresses';
         $params = [
@@ -278,8 +236,7 @@ class Client
         return $this->request('POST', $apiPath, $params);
     }
 
-    //获取当前用户下与当前用户建立消息关系的列表
-    public function apiQueryMsgRelationList($currentPage = 1, $pageSize = 20, $msgSources = 'message_center')
+    public function queryMsgRelationList($currentPage = 1, $pageSize = 20, $msgSources = 'message_center')
     {
         $apiPath = 'aliexpress.open/api.queryMsgRelationList';
         $params = [
@@ -291,8 +248,7 @@ class Client
         return $this->request('POST', $apiPath, $params);
     }
 
-    //站内信/订单留言查询详情列表
-    public function apiQueryMsgDetailList($channelId, $currentPage = 1, $pageSize = 20, $msgSources = 'message_center')
+    public function queryMsgDetailList($channelId, $currentPage = 1, $pageSize = 20, $msgSources = 'message_center')
     {
         $apiPath = 'aliexpress.open/api.queryMsgDetailList';
         $params = [
@@ -305,16 +261,14 @@ class Client
         return $this->request('POST', $apiPath, $params);
     }
 
-
-    //速卖通发信
-    public function apiAddMsg($channelId, $buyerId, $content, $msgSources)
+    public function addMsg($channelId, $buyerId, $content, $msgSources = 'message_center')
     {
         $apiPath = 'aliexpress.open/api.addMsg';
         $params = [
             'channelId' => $channelId,
             'buyerId' => $buyerId,
             'content' => $content,
-            'msgSources' => 'message_center',
+            'msgSources' => $msgSources,
         ];
 
         return $this->request('POST', $apiPath, $params);
