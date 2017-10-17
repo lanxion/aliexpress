@@ -16,16 +16,16 @@ class Client
 
     public function __construct($appKey, $secKey, $refreshToken, $accessToken = '', $expiredAt = 0, $httpClient = null)
     {
-        $this->httpClient = $httpClient ? : new HttpClient();
         $this->appKey = $appKey;
         $this->secKey = $secKey;
         $this->refreshToken = $refreshToken;
+        $this->initHttpClient($httpClient);
         $this->setAccessToken($accessToken, $expiredAt);
     }
 
     public function setAccessToken($accessToken, $expiredAt)
     {
-        if (! empty($accessToken) && $expiredAt > 100) {
+        if (! empty($accessToken) && $expiredAt-100 > time()) {
             $this->accessToken = $accessToken;
             $this->expiredAt = $expiredAt;
         } else {
