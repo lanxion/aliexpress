@@ -33,6 +33,16 @@ class Client
         }
     }
 
+    public function getAccessToken()
+    {
+        return $this->accessToken;
+    }
+
+    public function getAccessTokenExpiredAt()
+    {
+        return $this->expiredAt;
+    }
+
     public function initHttpClient($client = null)
     {
         $this->httpClient = $client ? : new HttpClient();
